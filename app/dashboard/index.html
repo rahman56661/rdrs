@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RDRS - Security Operations Dashboard</title>
+<style>
+:root{--bg:#0b0f17;--panel:#131a26;--line:#222c3d;--txt:#d7deea;--mut:#8593aa;--ok:#22c55e;--warn:#f59e0b;--crit:#ef4444;--acc:#38bdf8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+header{display:flex;gap:14px;align-items:center;padding:14px 22px;border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0;flex:1}header small{color:var(--mut);font-weight:400}
+.pill{padding:3px 10px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--mut)}
+main{padding:18px 22px;display:grid;gap:16px;grid-template-columns:repeat(12,1fr)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+.card h2{margin:0 0 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.c4{grid-column:span 4}.c6{grid-column:span 6}.c8{grid-column:span 8}.c12{grid-column:span 12}
+@media(max-width:1000px){.c4,.c6,.c8{grid-column:span 12}}
+.level{font-size:34px;font-weight:700}.score{font-size:15px;color:var(--mut)}
+.Normal{color:var(--ok)}.Warning{color:var(--warn)}.Critical{color:var(--crit)}
+.Critical.big{animation:pulse 1s infinite}@keyframes pulse{50%{opacity:.45}}
+.bar{height:10px;background:#0b1220;border-radius:6px;overflow:hidden;margin:10px 0}
+.bar>i{display:block;height:100%;width:0;background:var(--ok);transition:width .4s,background .4s}
+ul{margin:6px 0 0;padding-left:18px}li{margin:3px 0}li b{color:var(--acc)}.mut{color:var(--mut)}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.metrics div{background:#0e1522;border-radius:8px;padding:8px 10px}.metrics span{display:block;color:var(--mut);font-size:11px}.metrics strong{font-size:18px}
+.btns{display:flex;flex-wrap:wrap;gap:8px}button{border:1px solid var(--line);background:#182235;color:var(--txt);padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px}
+button:hover:not(:disabled){border-color:var(--acc)}button:disabled{opacity:.45;cursor:not-allowed}
+button.danger{background:#3a1519;border-color:#7f1d1d}
+table{width:100%;border-collapse:collapse;font-size:12.5px}th{color:var(--mut);text-align:left;font-weight:500}
+td,th{padding:5px 6px;border-bottom:1px solid var(--line);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+a{color:var(--acc)}canvas{width:100%;height:170px;display:block}#msg{min-height:18px;color:var(--mut);margin-top:8px}
+</style></head><body>
+<header><h1>RDRS <small>Ransomware Detection &amp; Response System</small></h1>
+<span class="pill" id="sim">simulation mode</span><span class="pill" id="up">-</span></header>
+<main>
+<section class="card c4"><h2>Threat level</h2>
+ <div class="level" id="level">-</div><div class="score" id="score">-</div>
+ <div class="bar"><i id="barfill"></i></div>
+ <h2 style="margin-top:12px">Why this score (explainable)</h2><ul id="why"></ul></section>
+<section class="card c8"><h2>Live window metrics</h2><div class="metrics" id="metrics"></div>
+ <h2 style="margin-top:14px">Demo controls (sandbox only - safe)</h2>
+ <div class="btns">
+  <button class="danger" data-sim="attack">Simulate Attack</button>
+  <button data-sim="normal">Normal activity</button>
+  <button data-sim="zip">ZIP backup (false-positive test)</button>
+  <button id="scan">Scan now</button><button id="reset">Reset sandbox + window</button></div>
+ <div id="msg"></div></section>
+<section class="card c6"><h2>Threat score timeline</h2><canvas id="c1"></canvas></section>
+<section class="card c6"><h2>Avg entropy (0-8) &amp; peak process CPU %</h2><canvas id="c2"></canvas></section>
+<section class="card c6"><h2>Recent alerts</h2><table><thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead><tbody id="alerts"></tbody></table></section>
+<section class="card c6"><h2>Incidents</h2><table><thead><tr><th>#</th><th>Time</th><th>Score</th><th>Files</th><th>MTTD</th><th>Suspect</th><th>Report</th></tr></thead><tbody id="inc"></tbody></table></section>
+<section class="card c6"><h2>Top modified files (last window)</h2><table><thead><tr><th>File</th><th>Changes</th></tr></thead><tbody id="top"></tbody></table></section>
+<section class="card c6"><h2>Recent events</h2><table><thead><tr><th>Time</th><th>Type</th><th>File</th><th>Entropy</th></tr></thead><tbody id="ev"></tbody></table></section>
+</main>
+<script>
+const $=id=>document.getElementById(id), COL={Normal:'#22c55e',Warning:'#f59e0b',Critical:'#ef4444'};
+const get=p=>fetch(p).then(r=>r.json()), post=p=>fetch(p,{method:'POST'}).then(async r=>({ok:r.ok,data:await r.json()}));
+// SECURITY: file names come from the monitored system, so we only ever use textContent (never innerHTML).
+function td(txt,cls){const e=document.createElement('td');e.textContent=txt??'';if(cls)e.className=cls;return e}
+function fill(id,rows,cells){$(id).replaceChildren(...rows.map(r=>{const tr=document.createElement('tr');cells(r).forEach(c=>tr.append(c));return tr}))}
+const hm=s=>s?String(s).slice(11,19):'', base=p=>String(p||'').split(/[\\/]/).slice(-2).join('/');
+function reportCell(id,files){const t=document.createElement('td');
+ files.forEach(f=>{const a=document.createElement('a');a.href='/reports/download/'+encodeURIComponent(f);a.textContent=f.split('.').pop();a.target='_blank';a.style.marginRight='8px';t.append(a)});
+ const b=document.createElement('button');b.textContent=files.length?'Regenerate':'Generate';b.style.padding='2px 8px';
+ b.onclick=async()=>{const r=await post('/reports/'+id);$('msg').textContent=r.ok?'Report generated for incident #'+id:(r.data.detail||'failed');refresh()};t.append(b);return t}
+function chart(cv,series,ymax,bands){
+ const d=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*d;cv.height=h*d;const g=cv.getContext('2d');g.scale(d,d);g.clearRect(0,0,w,h);
+ (bands||[]).forEach(b=>{g.fillStyle=b.c;const y1=h-b.to/ymax*h,y0=h-b.from/ymax*h;g.fillRect(0,y1,w,y0-y1)});
+ g.strokeStyle='#222c3d';g.lineWidth=1;for(let i=1;i<4;i++){g.beginPath();g.moveTo(0,h*i/4);g.lineTo(w,h*i/4);g.stroke()}
+ series.forEach(s=>{if(s.v.length<2)return;g.strokeStyle=s.c;g.lineWidth=2;g.beginPath();
+  s.v.forEach((v,i)=>{const x=i/(s.v.length-1)*w,y=h-Math.min(v,s.max)/s.max*h;i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()});
+ g.fillStyle='#8593aa';g.font='11px system-ui';let x=6;series.forEach(s=>{g.fillStyle=s.c;g.fillText(s.n,x,12);x+=g.measureText(s.n).width+14})}
+async function refresh(){
+ try{
+  const [s,al,ev,inc,top,hist,reps]=await Promise.all([get('/status'),get('/alerts?limit=8'),get('/events?limit=12'),get('/incidents?limit=5'),get('/top-files?limit=8'),get('/history'),get('/reports')]);
+  const lv=$('level');lv.textContent=s.level;lv.className='level '+s.level+(s.level==='Critical'?' big':'');
+  $('score').textContent=s.score+' / 100';const b=$('barfill');b.style.width=s.score+'%';b.style.background=COL[s.level];
+  $('sim').textContent=s.simulation_mode?'SIMULATION MODE (no process is ever killed)':'live mode';
+  $('up').textContent='uptime '+s.uptime_seconds+'s | events '+s.counts.events+' | incidents '+s.counts.incidents;
+  const why=$('why');why.replaceChildren();
+  const ks=Object.keys(s.breakdown||{});if(!ks.length){const li=document.createElement('li');li.className='mut';li.textContent='No suspicious signals';why.append(li)}
+  ks.forEach(k=>{const li=document.createElement('li'),bd=document.createElement('b');bd.textContent=k+' +'+s.breakdown[k].points;li.append(bd,' - '+(s.breakdown[k].reason||''));why.append(li)});
+  const m=s.metrics||{},M=[['Files modified (window)',m.files_modified_per_min],['Renames',m.renames],['Extension changes',m.extension_changes],['High-entropy files',m.high_entropy_files],['Avg entropy',m.avg_entropy!=null?m.avg_entropy.toFixed(2):'-'],['Peak CPU %',m.max_cpu!=null?m.max_cpu.toFixed(0):'-']];
+  $('metrics').replaceChildren(...M.map(([k,v])=>{const d=document.createElement('div'),a=document.createElement('span'),c=document.createElement('strong');a.textContent=k;c.textContent=v??'-';d.append(a,c);return d}));
+  fill('alerts',al,a=>[td(hm(a.timestamp)),td(a.level,a.level),td(a.message)]);
+  fill('ev',ev,e=>[td(hm(e.timestamp)),td(e.event_type),td(base(e.dest_path||e.path)),td(e.entropy!=null?e.entropy.toFixed(2):'-')]);
+  fill('top',top,t=>[td(base(t.path)),td(t.modifications)]);
+  fill('inc',inc,i=>{const su=i.suspect_process||{},sm=i.summary||{};return[td(i.id),td(hm(i.timestamp)),td(i.score,'Critical'),td(sm.affected_count??''),td(sm.mttd_seconds!=null?sm.mttd_seconds+'s':'-'),td(su.name||'unknown'),reportCell(i.id,(reps.find(x=>x.incident_id===i.id)||{}).report_files||[])]});
+  const th=s.levels;chart($('c1'),[{n:'score',c:'#38bdf8',max:100,v:hist.map(x=>x.score)}],100,[{from:0,to:th.warning,c:'rgba(34,197,94,.07)'},{from:th.warning,to:th.critical,c:'rgba(245,158,11,.10)'},{from:th.critical,to:100,c:'rgba(239,68,68,.12)'}]);
+  chart($('c2'),[{n:'avg entropy',c:'#a78bfa',max:8,v:hist.map(x=>x.entropy)},{n:'peak CPU %',c:'#f59e0b',max:100,v:hist.map(x=>x.cpu)}],1);
+  document.querySelectorAll('[data-sim],#reset').forEach(x=>x.disabled=s.simulator_running);
+ }catch(e){$('msg').textContent='API not reachable: '+e}}
+document.querySelectorAll('[data-sim]').forEach(b=>b.onclick=async()=>{const r=await post('/simulate/'+b.dataset.sim);$('msg').textContent=r.ok?'Started "'+b.dataset.sim+'" simulation in the sandbox...':(r.data.detail||'failed');refresh()});
+$('reset').onclick=async()=>{const r=await post('/simulate/reset');$('msg').textContent=r.ok?'Sandbox cleaned ('+r.data.removed_files+' files) and detection window reset.':(r.data.detail||'failed');refresh()};
+$('scan').onclick=async()=>{const r=await post('/scan');$('msg').textContent=r.ok?'Scan: '+r.data.scanned+' files, '+r.data.suspicious_count+' look encrypted.':'scan failed'};
+refresh();setInterval(refresh,2000);
+</script></body></html>

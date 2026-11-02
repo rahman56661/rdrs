@@ -1,0 +1,9 @@
+watchdog
+psutil
+pyyaml
+loguru
+sqlalchemy
+fastapi
+uvicorn
+jinja2
+reportlab

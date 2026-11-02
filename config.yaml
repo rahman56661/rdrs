@@ -1,0 +1,52 @@
+# RDRS configuration - all settings live here
+watch_paths:
+  - data/sandbox          # folders to monitor (sandbox only!)
+
+database_path: data/rdrs.db
+reports_dir: data/reports
+log_dir: logs
+simulation_mode: true      # NEVER kills processes when true
+
+entropy:
+  sample_bytes: 65536      # read first 64 KB only
+  # File types that are naturally high-entropy (compressed/media).
+  # Used later to reduce false positives.
+  expected_high_entropy_ext: [.zip, .gz, .7z, .rar, .jpg, .jpeg, .png, .mp4, .mp3, .pdf, .docx, .xlsx]
+
+process_monitor:
+  interval_seconds: 2
+  top_n: 10
+
+detection:
+  window_seconds: 60
+  recent_seconds: 10             # secondary signals only count while activity is ongoing
+  thresholds:
+    rapid_encryption_files: 20   # high-entropy files inside the window
+    extension_changes: 15        # renames that change the extension
+    avg_entropy: 7.0             # average entropy of recently written files
+    entropy_value: 7.0           # a write at/above this looks "encrypted"
+    min_samples: 5               # need this many files before judging avg entropy
+    cpu_percent: 80
+  weights:                       # points added when a signal fires (capped at 100)
+    rapid_encryption: 40
+    mass_rename: 30
+    high_entropy: 25
+    cpu_spike: 15
+    unknown_program: 10
+  levels:
+    warning: 40                  # 40-69 Warning
+    critical: 70                 # 70-100 Critical
+  trusted_processes: [explorer.exe, svchost.exe, system, chrome.exe, msedge.exe, firefox.exe,
+                      code.exe, onedrive.exe, searchindexer.exe, msmpeng.exe, antimalware service executable]
+
+response:
+  quarantine_dir: data/quarantine   # MUST be outside the watched folders
+  incident_cooldown_seconds: 120    # one incident per attack, not 100
+  max_evidence_files: 200
+  max_evidence_file_mb: 10
+  terminate_process: false          # even if true: simulation only logs, never kills
+
+api:
+  enabled: true
+  host: 127.0.0.1
+  port: 8765

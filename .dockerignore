@@ -1,0 +1,10 @@
+.venv
+__pycache__
+*.pyc
+.git
+.pytest_cache
+.coverage
+data/rdrs.db
+data/quarantine
+data/reports
+logs/*.log

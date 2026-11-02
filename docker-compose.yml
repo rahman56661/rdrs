@@ -1,0 +1,17 @@
+services:
+  rdrs:
+    build: .
+    container_name: rdrs
+    ports:
+      - "127.0.0.1:8765:8765" # dashboard + API, reachable ONLY from this machine (API has no login)
+    environment:
+      RDRS_API_HOST: 0.0.0.0
+      RDRS_API_PORT: "8765"
+    volumes:
+      - rdrs-data:/app/data   # db, sandbox, quarantine, reports (named volume: file events work reliably)
+      - rdrs-logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  rdrs-data:
+  rdrs-logs:
